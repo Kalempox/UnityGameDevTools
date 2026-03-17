@@ -1,0 +1,8 @@
+{
+    "name": "com.taafmedya.gamedevtools",
+    "version": "1.0.0",
+    "displayName": "Taaf Game Dev Tools",
+    "description": "Custom MCP tools for autonomous Unity game development",
+    "unity": "6.0",
+    "type": "tool"
+  }
