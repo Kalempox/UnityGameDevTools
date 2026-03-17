@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Object = UnityEngine.Object;
 
 /// <summary>
 /// Custom game dev tools accessible via Unity menu items.
