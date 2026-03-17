@@ -4,200 +4,110 @@ using UnityEngine.UI;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.ComponentModel;
 
-[McpPluginToolType]
-public class ReferenceAnalyzerTool
+/// <summary>
+/// Custom game dev tools accessible via Unity menu items.
+/// Call these through MCP using: execute_menu_item("GameDevTools/...")
+/// </summary>
+public static class ReferenceAnalyzerTool
 {
     // ─────────────────────────────────────────────
-    // TOOL 1 — Referans görseli oku ve analiz için hazırla
+    // TOOL 1 — List reference images
+    // MCP call: execute_menu_item("GameDevTools/List Reference Images")
     // ─────────────────────────────────────────────
-    [McpPluginTool("analyze_reference_image")]
-    [Description(
-        "Reads an image from the references/ folder at project root. " +
-        "Returns base64 image data with analysis instructions. " +
-        "Use this before UIDesignAgent runs — pass the result to Vision analysis " +
-        "to extract colors, layout, UI patterns for ui_design_spec.json.")]
-    public string AnalyzeReferenceImage(string imageName)
+    [MenuItem("GameDevTools/List Reference Images")]
+    public static void ListReferenceImages()
     {
         var projectRoot = Path.GetDirectoryName(Application.dataPath);
-        var path = Path.Combine(projectRoot, "references", imageName);
+        var refDir = Path.Combine(projectRoot, "references");
 
-        if (!File.Exists(path))
+        if (!Directory.Exists(refDir))
         {
-            var available = Directory.Exists(Path.Combine(projectRoot, "references"))
-                ? string.Join(", ", Directory.GetFiles(Path.Combine(projectRoot, "references"), "*.png"))
-                : "references/ folder does not exist";
-            return $"ERROR: '{imageName}' not found.\nAvailable: {available}";
+            Debug.LogWarning($"[GameDevTools] references/ folder does not exist.\n" +
+                           $"Create it at: {refDir}\n" +
+                           "Then add PNG/JPG reference images.");
+            return;
         }
 
-        var bytes = File.ReadAllBytes(path);
-        var base64 = Convert.ToBase64String(bytes);
-        var ext = Path.GetExtension(imageName).ToLower();
-        var mimeType = ext == ".jpg" || ext == ".jpeg" ? "image/jpeg" : "image/png";
+        var extensions = new[] { "*.png", "*.jpg", "*.jpeg" };
+        var files = new List<string>();
+        foreach (var ext in extensions)
+            files.AddRange(Directory.GetFiles(refDir, ext));
 
-        return $"REFERENCE_IMAGE_READY\n" +
-               $"file: {imageName}\n" +
-               $"size: {bytes.Length / 1024}KB\n" +
-               $"mime: {mimeType}\n" +
-               $"base64_length: {base64.Length}\n" +
-               $"instruction: Analyze this game screenshot or UI reference. Extract exactly:\n" +
-               $"  - background_color (hex)\n" +
-               $"  - panel_color (hex)\n" +
-               $"  - panel_corner_radius (px estimate)\n" +
-               $"  - primary_button_color (hex)\n" +
-               $"  - accent_color (hex)\n" +
-               $"  - text_color (hex)\n" +
-               $"  - score_panel_shape (cloud/pill/flat/ribbon/number-only)\n" +
-               $"  - score_panel_position (top-center/top-left/top-right)\n" +
-               $"  - button_style (flat/3d-raised/outlined)\n" +
-               $"  - game_over_style (banner/card/overlay)\n" +
-               $"  - font_weight (thin/regular/bold/black)\n" +
-               $"  - full_color_palette (list of 5-8 hex codes)\n" +
-               $"Return as JSON matching ui_design_spec.json structure.\n" +
-               $"BASE64:{base64}";
+        if (files.Count == 0)
+        {
+            Debug.LogWarning($"[GameDevTools] references/ folder is empty. Add PNG or JPG images.");
+            return;
+        }
+
+        var result = $"[GameDevTools] Found {files.Count} reference image(s):\n";
+        foreach (var f in files)
+        {
+            var info = new FileInfo(f);
+            result += $"  - {info.Name}  ({info.Length / 1024}KB)\n";
+        }
+        Debug.Log(result);
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 2 — Görselden sprite crop et, Unity'ye import et
+    // TOOL 2 — Check visual quality
+    // MCP call: execute_menu_item("GameDevTools/Check Visual Quality")
     // ─────────────────────────────────────────────
-    [McpPluginTool("extract_sprite_from_reference")]
-    [Description(
-        "Crops a rectangular region from a reference image and imports it as a sprite. " +
-        "Saves to Assets/Art/Extracted/[outputName].png. " +
-        "Use pixel coordinates from the source image. " +
-        "Example: extract the watermelon from a Suika Game screenshot.")]
-    public string ExtractSpriteFromReference(
-        string imageName,
-        int x, int y,
-        int width, int height,
-        string outputName)
-    {
-        var projectRoot = Path.GetDirectoryName(Application.dataPath);
-        var inputPath = Path.Combine(projectRoot, "references", imageName);
-
-        if (!File.Exists(inputPath))
-            return $"ERROR: '{imageName}' not found in references/ folder";
-
-        if (width <= 0 || height <= 0)
-            return "ERROR: width and height must be greater than 0";
-
-        // Görseli yükle
-        var bytes = File.ReadAllBytes(inputPath);
-        var tex = new Texture2D(2, 2);
-        if (!tex.LoadImage(bytes))
-            return "ERROR: Failed to load image — check file format (PNG or JPG only)";
-
-        // Sınır kontrolü
-        x = Mathf.Clamp(x, 0, tex.width - 1);
-        y = Mathf.Clamp(y, 0, tex.height - 1);
-        width = Mathf.Clamp(width, 1, tex.width - x);
-        height = Mathf.Clamp(height, 1, tex.height - y);
-
-        // Unity'nin koordinat sistemi Y-flipped
-        int flippedY = tex.height - y - height;
-
-        // Crop
-        var cropped = new Texture2D(width, height, TextureFormat.RGBA32, false);
-        var pixels = tex.GetPixels(x, flippedY, width, height);
-        cropped.SetPixels(pixels);
-        cropped.Apply();
-
-        // Kaydet
-        var outputDir = Path.Combine(Application.dataPath, "Art", "Extracted");
-        if (!Directory.Exists(outputDir))
-            Directory.CreateDirectory(outputDir);
-
-        var outputPath = Path.Combine(outputDir, $"{outputName}.png");
-        File.WriteAllBytes(outputPath, cropped.EncodeToPNG());
-        AssetDatabase.Refresh();
-
-        // Sprite olarak import et
-        var assetPath = $"Assets/Art/Extracted/{outputName}.png";
-        var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
-        if (importer != null)
-        {
-            importer.textureType = TextureImporterType.Sprite;
-            importer.spritePixelsPerUnit = 100;
-            importer.filterMode = FilterMode.Bilinear;
-            importer.alphaIsTransparency = true;
-            importer.SaveAndReimport();
-        }
-
-        return $"SUCCESS: Sprite extracted and imported\n" +
-               $"path: {assetPath}\n" +
-               $"size: {width}x{height}px\n" +
-               $"usage: Load with Resources.Load or assign in inspector";
-    }
-
-    // ─────────────────────────────────────────────
-    // TOOL 3 — Sahnedeki görsel kaliteyi kontrol et
-    // ─────────────────────────────────────────────
-    [McpPluginTool("check_visual_quality")]
-    [Description(
-        "Scans ALL renderers and UI images in the current scene. " +
-        "Reports: missing sprites, gray/uncolored objects, default white panels, " +
-        "placeholder visuals. Run this after every visual agent completes. " +
-        "A clean result means no gray or placeholder objects exist.")]
-    public string CheckVisualQuality()
+    [MenuItem("GameDevTools/Check Visual Quality")]
+    public static void CheckVisualQuality()
     {
         var issues = new List<string>();
-        var ok = new List<string>();
 
-        // SpriteRenderer kontrolü
+        // SpriteRenderer check
         var spriteRenderers = GameObject.FindObjectsOfType<SpriteRenderer>(true);
         foreach (var r in spriteRenderers)
         {
-            var name = GetPath(r.gameObject);
+            var path = GetPath(r.gameObject);
 
             if (r.sprite == null)
             {
-                issues.Add($"[NO SPRITE]  {name}");
+                issues.Add($"[NO SPRITE]  {path}");
                 continue;
             }
 
             Color.RGBToHSV(r.color, out _, out float sat, out float val);
 
             if (sat < 0.12f && val > 0.25f)
-                issues.Add($"[GRAY]       {name}  (saturation={sat:F2}, likely uncolored)");
+                issues.Add($"[GRAY]       {path}  (saturation={sat:F2})");
             else if (r.color == Color.white && r.sprite.name.ToLower().Contains("default"))
-                issues.Add($"[DEFAULT]    {name}  (white + default sprite — placeholder)");
-            else
-                ok.Add($"✓ {name}");
+                issues.Add($"[DEFAULT]    {path}  (white + default sprite)");
         }
 
-        // UI Image kontrolü
+        // UI Image check
         var images = GameObject.FindObjectsOfType<Image>(true);
         foreach (var img in images)
         {
-            var name = GetPath(img.gameObject);
             Color.RGBToHSV(img.color, out _, out float sat, out float val);
-
             if (img.sprite == null && sat < 0.10f && val > 0.20f)
-                issues.Add($"[UI-GRAY]    {name}  (flat gray panel, no sprite)");
+                issues.Add($"[UI-GRAY]    {GetPath(img.gameObject)}  (flat gray panel)");
         }
 
         if (issues.Count == 0)
-            return $"✅ Visual quality PASSED\n" +
-                   $"Checked: {spriteRenderers.Length} sprite renderers, {images.Length} UI images\n" +
-                   $"Result: No gray or placeholder objects found";
-
-        return $"⚠️ Visual quality FAILED — {issues.Count} issue(s) found:\n\n" +
-               string.Join("\n", issues) +
-               $"\n\nFix all issues before QA passes.\n" +
-               $"Total checked: {spriteRenderers.Length + images.Length} objects";
+        {
+            Debug.Log($"[GameDevTools] ✅ Visual quality PASSED\n" +
+                     $"Checked: {spriteRenderers.Length} sprites, {images.Length} UI images\n" +
+                     "No gray or placeholder objects found.");
+        }
+        else
+        {
+            var msg = $"[GameDevTools] ⚠️ Visual quality FAILED — {issues.Count} issue(s):\n\n";
+            msg += string.Join("\n", issues);
+            msg += $"\n\nTotal checked: {spriteRenderers.Length + images.Length} objects";
+            Debug.LogWarning(msg);
+        }
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 4 — Game view screenshot al
+    // TOOL 3 — Capture screenshot
+    // MCP call: execute_menu_item("GameDevTools/Capture Screenshot")
     // ─────────────────────────────────────────────
-    [McpPluginTool("capture_game_view")]
-    [Description(
-        "Captures the current Scene view as a PNG screenshot. " +
-        "Saves to QA/screenshots/ folder in project root. " +
-        "Returns the file path. Use after each agent completes " +
-        "to visually verify the build state.")]
-    public string CaptureGameView()
+    [MenuItem("GameDevTools/Capture Screenshot")]
+    public static void CaptureScreenshot()
     {
         var projectRoot = Path.GetDirectoryName(Application.dataPath);
         var outputDir = Path.Combine(projectRoot, "QA", "screenshots");
@@ -209,89 +119,104 @@ public class ReferenceAnalyzerTool
         var filename = $"screenshot_{timestamp}.png";
         var outputPath = Path.Combine(outputDir, filename);
 
-        try
-        {
-            // Scene view üzerinden screenshot
-            var sceneView = SceneView.lastActiveSceneView;
-            if (sceneView == null)
-                return "WARNING: No active Scene view found. Open the Scene view window first.";
-
-            int width  = (int)sceneView.position.width;
-            int height = (int)sceneView.position.height;
-
-            var rt = new RenderTexture(width, height, 24);
-            var prev = RenderTexture.active;
-
-            sceneView.camera.targetTexture = rt;
-            sceneView.camera.Render();
-            RenderTexture.active = rt;
-
-            var screenshot = new Texture2D(width, height, TextureFormat.RGB24, false);
-            screenshot.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-            screenshot.Apply();
-
-            RenderTexture.active = prev;
-            sceneView.camera.targetTexture = null;
-            rt.Release();
-
-            File.WriteAllBytes(outputPath, screenshot.EncodeToPNG());
-
-            return $"SUCCESS: Screenshot saved\n" +
-                   $"path: QA/screenshots/{filename}\n" +
-                   $"size: {width}x{height}px\n" +
-                   $"Note: Open this file to visually verify the build state";
-        }
-        catch (Exception e)
-        {
-            // Fallback: ScreenCapture
-            ScreenCapture.CaptureScreenshot(outputPath);
-            return $"Screenshot saved (fallback method)\n" +
-                   $"path: QA/screenshots/{filename}\n" +
-                   $"Note: {e.Message}";
-        }
+        ScreenCapture.CaptureScreenshot(outputPath);
+        Debug.Log($"[GameDevTools] Screenshot saved: QA/screenshots/{filename}");
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 5 — references/ klasöründeki dosyaları listele
+    // TOOL 4 — Validate fruit database (game-specific)
+    // MCP call: execute_menu_item("GameDevTools/Validate Fruit Database")
     // ─────────────────────────────────────────────
-    [McpPluginTool("list_reference_images")]
-    [Description(
-        "Lists all image files in the references/ folder at project root. " +
-        "Call this first to see what reference images are available " +
-        "before calling analyze_reference_image.")]
-    public string ListReferenceImages()
+    [MenuItem("GameDevTools/Validate Fruit Database")]
+    public static void ValidateFruitDatabase()
     {
-        var projectRoot = Path.GetDirectoryName(Application.dataPath);
-        var refDir = Path.Combine(projectRoot, "references");
+        var db = AssetDatabase.LoadAssetAtPath<ScriptableObject>(
+            "Assets/Data/FruitDatabase.asset");
 
-        if (!Directory.Exists(refDir))
-            return "references/ folder does not exist.\n" +
-                   $"Create it at: {refDir}\n" +
-                   "Then add PNG/JPG reference images (e.g. suika_screenshot.png)";
-
-        var extensions = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp" };
-        var files = new List<string>();
-
-        foreach (var ext in extensions)
-            files.AddRange(Directory.GetFiles(refDir, ext));
-
-        if (files.Count == 0)
-            return $"references/ folder exists but is empty.\n" +
-                   $"Add PNG or JPG images to: {refDir}";
-
-        var result = $"Found {files.Count} reference image(s):\n";
-        foreach (var f in files)
+        if (db == null)
         {
-            var info = new FileInfo(f);
-            result += $"  - {info.Name}  ({info.Length / 1024}KB)\n";
+            Debug.LogError("[GameDevTools] FruitDatabase.asset not found at Assets/Data/FruitDatabase.asset");
+            return;
         }
-        return result;
+
+        // SerializedObject ile kontrol et
+        var so = new SerializedObject(db);
+        var fruitsArray = so.FindProperty("fruits");
+
+        if (fruitsArray == null)
+        {
+            Debug.LogWarning("[GameDevTools] FruitDatabase has no 'fruits' array property.");
+            return;
+        }
+
+        var issues = new List<string>();
+        for (int i = 0; i < fruitsArray.arraySize; i++)
+        {
+            var elem = fruitsArray.GetArrayElementAtIndex(i);
+            if (elem.objectReferenceValue == null)
+                issues.Add($"Tier {i + 1}: NULL entry");
+        }
+
+        if (fruitsArray.arraySize != 11)
+            issues.Add($"Expected 11 tiers, found {fruitsArray.arraySize}");
+
+        if (issues.Count == 0)
+            Debug.Log($"[GameDevTools] ✅ FruitDatabase valid — {fruitsArray.arraySize} tiers OK");
+        else
+            Debug.LogWarning($"[GameDevTools] ⚠️ FruitDatabase issues:\n{string.Join("\n", issues)}");
     }
 
     // ─────────────────────────────────────────────
-    // Yardımcı — GameObject hiyerarşi yolu
+    // TOOL 5 — Full QA report
+    // MCP call: execute_menu_item("GameDevTools/Run Full QA Report")
     // ─────────────────────────────────────────────
-    private string GetPath(GameObject go)
+    [MenuItem("GameDevTools/Run Full QA Report")]
+    public static void RunFullQAReport()
+    {
+        Debug.Log("[GameDevTools] ═══ FULL QA REPORT ═══");
+        CheckVisualQuality();
+        CheckEventSystem();
+        CheckTMPUsage();
+        Debug.Log("[GameDevTools] ═══ QA REPORT COMPLETE ═══");
+    }
+
+    // ─────────────────────────────────────────────
+    // Helper checks
+    // ─────────────────────────────────────────────
+    private static void CheckEventSystem()
+    {
+        var es = GameObject.FindObjectOfType<UnityEngine.EventSystems.EventSystem>();
+        if (es == null)
+        {
+            Debug.LogError("[GameDevTools] ❌ EventSystem NOT FOUND in scene!");
+            return;
+        }
+
+        bool hasNewInput = es.GetComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>() != null;
+        bool hasOldInput = es.GetComponent<UnityEngine.EventSystems.StandaloneInputModule>() != null;
+
+        if (!hasNewInput && !hasOldInput)
+            Debug.LogError("[GameDevTools] ❌ EventSystem has no input module!");
+        else
+            Debug.Log($"[GameDevTools] ✅ EventSystem OK — NewInput:{hasNewInput} OldInput:{hasOldInput}");
+    }
+
+    private static void CheckTMPUsage()
+    {
+        var legacyTexts = GameObject.FindObjectsOfType<UnityEngine.UI.Text>(true);
+        if (legacyTexts.Length > 0)
+        {
+            var names = new List<string>();
+            foreach (var t in legacyTexts) names.Add(GetPath(t.gameObject));
+            Debug.LogError($"[GameDevTools] ❌ Legacy Text found ({legacyTexts.Length}):\n{string.Join("\n", names)}");
+        }
+        else
+        {
+            Debug.Log("[GameDevTools] ✅ No legacy Text components — TMP only");
+        }
+    }
+
+    private static string GetPath(GameObject go)
     {
         var path = go.name;
         var parent = go.transform.parent;
