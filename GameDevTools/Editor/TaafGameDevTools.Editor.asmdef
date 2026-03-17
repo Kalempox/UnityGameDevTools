@@ -2,7 +2,8 @@
     "name": "TaafGameDevTools.Editor",
     "rootNamespace": "",
     "references": [
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Unity.TextMeshPro"
     ],
     "includePlatforms": [
         "Editor"
