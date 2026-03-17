@@ -7,269 +7,367 @@ using System.IO;
 using Object = UnityEngine.Object;
 
 /// <summary>
-/// Custom game dev tools accessible via Unity menu items.
-/// Call via MCP: execute_menu_item("GameDevTools/...")
-/// Results appear in Unity Console — read with read_console_logs.
+/// Taaf Game Dev Tools — Custom MCP tools for autonomous Unity game development.
+/// All tools accessible via MCP: execute_menu_item("GameDevTools/...")
+/// Results written to Unity Console — read with read_console_logs.
+/// Reference images go in: Assets/References/ (inside project, not project root)
 /// </summary>
 public static class ReferenceAnalyzerTool
 {
+    // References folder is INSIDE Assets for easy management
+    private static string ReferencesPath =>
+        Path.Combine(Application.dataPath, "References");
+
+    private static string TempPath =>
+        Path.Combine(Application.dataPath, "References", "_temp");
+
     // ─────────────────────────────────────────────
-    // TOOL 1 — List reference images
+    // TOOL — Start Play Mode
+    // MCP: execute_menu_item("GameDevTools/Start Play Mode")
+    // ─────────────────────────────────────────────
+    [MenuItem("GameDevTools/Start Play Mode")]
+    public static void StartPlayMode()
+    {
+        if (EditorApplication.isPlaying)
+        {
+            Debug.Log("[GameDevTools] Already in Play Mode.");
+            return;
+        }
+        EditorApplication.isPlaying = true;
+        Debug.Log("[GameDevTools] PLAY_MODE_STARTED — entering Play Mode now.");
+    }
+
+    // ─────────────────────────────────────────────
+    // TOOL — Stop Play Mode
+    // MCP: execute_menu_item("GameDevTools/Stop Play Mode")
+    // ─────────────────────────────────────────────
+    [MenuItem("GameDevTools/Stop Play Mode")]
+    public static void StopPlayMode()
+    {
+        if (!EditorApplication.isPlaying)
+        {
+            Debug.Log("[GameDevTools] Not in Play Mode.");
+            return;
+        }
+        EditorApplication.isPlaying = false;
+        Debug.Log("[GameDevTools] PLAY_MODE_STOPPED.");
+    }
+
+    // ─────────────────────────────────────────────
+    // TOOL — List reference images
     // MCP: execute_menu_item("GameDevTools/List Reference Images")
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/List Reference Images")]
     public static void ListReferenceImages()
     {
-        var projectRoot = Path.GetDirectoryName(Application.dataPath);
-        var refDir = Path.Combine(projectRoot, "references");
-
-        if (!Directory.Exists(refDir))
-        {
-            Debug.LogWarning($"[GameDevTools] references/ folder does not exist.\nCreate it at: {refDir}");
-            return;
-        }
+        EnsureDirectories();
 
         var files = new List<string>();
         foreach (var ext in new[] { "*.png", "*.jpg", "*.jpeg" })
-            files.AddRange(Directory.GetFiles(refDir, ext));
+            files.AddRange(Directory.GetFiles(ReferencesPath, ext));
 
         if (files.Count == 0)
         {
-            Debug.LogWarning("[GameDevTools] references/ folder is empty. Add PNG or JPG reference images.");
+            Debug.LogWarning(
+                $"[GameDevTools] REFERENCES_EMPTY\n" +
+                $"No reference images found.\n" +
+                $"Add PNG/JPG files to: Assets/References/\n" +
+                $"You can drag images directly into the Unity Project panel under Assets/References/");
             return;
         }
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"[GameDevTools] Found {files.Count} reference image(s):");
+        sb.AppendLine($"[GameDevTools] REFERENCES_FOUND — {files.Count} image(s):");
         foreach (var f in files)
         {
             var info = new FileInfo(f);
-            sb.AppendLine($"  - {info.Name}  ({info.Length / 1024}KB)");
+            sb.AppendLine($"  {info.Name}  ({info.Length / 1024}KB)");
         }
         Debug.Log(sb.ToString());
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 2 — Read reference image as base64
+    // TOOL — Read reference image as base64 for Vision
+    // Write filename to Assets/References/_temp/request.txt first
     // MCP: execute_menu_item("GameDevTools/Read Reference As Base64")
-    // Then pass the image name via a marker in the log
-    // Usage: Agent reads console, finds REFERENCE_BASE64 marker
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/Read Reference As Base64")]
     public static void ReadReferenceAsBase64()
     {
-        // Agent must write the filename to a temp file before calling this
-        // File: ProjectRoot/references/_request.txt
-        var projectRoot = Path.GetDirectoryName(Application.dataPath);
-        var requestFile = Path.Combine(projectRoot, "references", "_request.txt");
+        EnsureDirectories();
+        var requestFile = Path.Combine(TempPath, "request.txt");
 
         if (!File.Exists(requestFile))
         {
-            Debug.LogWarning("[GameDevTools] No request file found.\n" +
-                           "Write the image filename to references/_request.txt first.\n" +
-                           "Example content: suika_screenshot.png");
+            Debug.LogWarning(
+                "[GameDevTools] REQUEST_FILE_MISSING\n" +
+                "Write the image filename to Assets/References/_temp/request.txt\n" +
+                "Example: suika_gameplay.png");
             return;
         }
 
         var imageName = File.ReadAllText(requestFile).Trim();
-        var imagePath = Path.Combine(projectRoot, "references", imageName);
+        var imagePath = Path.Combine(ReferencesPath, imageName);
 
         if (!File.Exists(imagePath))
         {
-            Debug.LogError($"[GameDevTools] Image not found: {imageName}\n" +
-                          $"Available images in references/: {GetAvailableReferenceImages(projectRoot)}");
+            var available = GetAvailableImages();
+            Debug.LogError(
+                $"[GameDevTools] IMAGE_NOT_FOUND: {imageName}\n" +
+                $"Available: {available}");
             return;
         }
 
         var bytes = File.ReadAllBytes(imagePath);
         var base64 = Convert.ToBase64String(bytes);
         var ext = Path.GetExtension(imageName).ToLower();
-        var mimeType = (ext == ".jpg" || ext == ".jpeg") ? "image/jpeg" : "image/png";
+        var mime = (ext == ".jpg" || ext == ".jpeg") ? "image/jpeg" : "image/png";
 
-        // Write to output file — base64 is too long for console
-        var outputPath = Path.Combine(projectRoot, "references", "_base64_output.txt");
-        File.WriteAllText(outputPath, $"MIME:{mimeType}\nFILE:{imageName}\nSIZE:{bytes.Length / 1024}KB\nBASE64:{base64}");
+        var outputFile = Path.Combine(TempPath, "base64_output.txt");
+        File.WriteAllText(outputFile,
+            $"FILE:{imageName}\n" +
+            $"MIME:{mime}\n" +
+            $"SIZE:{bytes.Length / 1024}KB\n" +
+            $"BASE64:{base64}");
 
-        Debug.Log($"[GameDevTools] REFERENCE_BASE64_READY\n" +
-                 $"File: {imageName}\n" +
-                 $"Size: {bytes.Length / 1024}KB\n" +
-                 $"Output written to: references/_base64_output.txt\n" +
-                 $"Read that file to get the base64 data for Vision analysis.\n" +
-                 $"Analysis instruction: Analyze this game screenshot in extreme detail. " +
-                 $"For every visible game object (fruits, UI panels, buttons, background), extract: " +
-                 $"exact shape, all colors as hex codes, gradient direction and colors, " +
-                 $"outline thickness as percentage of object size, shine/highlight position and opacity, " +
-                 $"shadow properties, face/expression details if present, " +
-                 $"surface texture pattern, edge softness. " +
-                 $"Return as JSON matching object_visual_spec.json format.");
+        Debug.Log(
+            $"[GameDevTools] BASE64_READY\n" +
+            $"File: {imageName} ({bytes.Length / 1024}KB)\n" +
+            $"Output: Assets/References/_temp/base64_output.txt\n" +
+            $"Read that file to get base64 data for Vision analysis.\n" +
+            $"VISION_PROMPT: Analyze this game screenshot in extreme detail. " +
+            $"For every visible element extract: exact shape, all hex colors, gradient direction+colors, " +
+            $"outline thickness as % of object size, shine position+opacity, shadow, face details if any, " +
+            $"surface patterns, UI panel styles, button styles, background colors. " +
+            $"Return as JSON matching object_visual_spec.json structure.");
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 3 — Save downloaded reference image
-    // Agent downloads image bytes, writes to references/_download.txt as base64
-    // Then calls this tool to decode and save as PNG
+    // TOOL — Save downloaded reference image
+    // Write to Assets/References/_temp/download.txt:
+    //   FILENAME:image.png
+    //   BASE64:[data]
     // MCP: execute_menu_item("GameDevTools/Save Downloaded Reference")
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/Save Downloaded Reference")]
     public static void SaveDownloadedReference()
     {
-        var projectRoot = Path.GetDirectoryName(Application.dataPath);
-        var downloadFile = Path.Combine(projectRoot, "references", "_download.txt");
+        EnsureDirectories();
+        var downloadFile = Path.Combine(TempPath, "download.txt");
 
         if (!File.Exists(downloadFile))
         {
-            Debug.LogWarning("[GameDevTools] No download file found.\n" +
-                           "Write to references/_download.txt with format:\n" +
-                           "FILENAME:suika_screenshot.png\n" +
-                           "BASE64:[base64 data]");
+            Debug.LogWarning(
+                "[GameDevTools] DOWNLOAD_FILE_MISSING\n" +
+                "Write to Assets/References/_temp/download.txt:\n" +
+                "FILENAME:image.png\n" +
+                "BASE64:[base64 data]");
             return;
         }
 
         var content = File.ReadAllText(downloadFile);
-        var lines = content.Split('\n');
+        string filename = null, base64Data = null;
 
-        string filename = null;
-        string base64Data = null;
-
-        foreach (var line in lines)
+        foreach (var line in content.Split('\n'))
         {
-            if (line.StartsWith("FILENAME:"))
-                filename = line.Substring("FILENAME:".Length).Trim();
-            else if (line.StartsWith("BASE64:"))
-                base64Data = line.Substring("BASE64:".Length).Trim();
+            if (line.StartsWith("FILENAME:")) filename = line.Substring(9).Trim();
+            else if (line.StartsWith("BASE64:")) base64Data = line.Substring(7).Trim();
         }
 
         if (string.IsNullOrEmpty(filename) || string.IsNullOrEmpty(base64Data))
         {
-            Debug.LogError("[GameDevTools] Invalid download file format.\n" +
-                          "Expected:\nFILENAME:image.png\nBASE64:[data]");
+            Debug.LogError("[GameDevTools] DOWNLOAD_FORMAT_INVALID — need FILENAME: and BASE64: lines");
             return;
         }
 
-        var refDir = Path.Combine(projectRoot, "references");
-        if (!Directory.Exists(refDir)) Directory.CreateDirectory(refDir);
+        var outputPath = Path.Combine(ReferencesPath, filename);
+        var imageBytes = Convert.FromBase64String(base64Data);
+        File.WriteAllBytes(outputPath, imageBytes);
+        AssetDatabase.Refresh();
 
-        var outputPath = Path.Combine(refDir, filename);
-        var bytes = Convert.FromBase64String(base64Data);
-        File.WriteAllBytes(outputPath, bytes);
-
-        Debug.Log($"[GameDevTools] REFERENCE_SAVED\n" +
-                 $"Saved: references/{filename}\n" +
-                 $"Size: {bytes.Length / 1024}KB\n" +
-                 $"Ready for analysis with Read Reference As Base64.");
+        Debug.Log(
+            $"[GameDevTools] REFERENCE_SAVED\n" +
+            $"Saved: Assets/References/{filename}\n" +
+            $"Size: {imageBytes.Length / 1024}KB\n" +
+            $"Ready for Vision analysis.");
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 4 — Compare generated sprite with reference
-    // Agent writes comparison request to references/_compare_request.txt:
-    //   REFERENCE:suika_cherry.png
-    //   GENERATED:Assets/Art/Fruits/Cherry_generated.png
+    // TOOL — Capture screenshot (works in Edit mode too)
+    // Saves to Assets/References/Screenshots/
+    // MCP: execute_menu_item("GameDevTools/Capture Screenshot")
+    // ─────────────────────────────────────────────
+    [MenuItem("GameDevTools/Capture Screenshot")]
+    public static void CaptureScreenshot()
+    {
+        EnsureDirectories();
+        var screenshotsDir = Path.Combine(ReferencesPath, "Screenshots");
+        if (!Directory.Exists(screenshotsDir)) Directory.CreateDirectory(screenshotsDir);
+
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var filename = $"screenshot_{timestamp}.png";
+        var fullPath = Path.Combine(screenshotsDir, filename);
+        var assetPath = $"Assets/References/Screenshots/{filename}";
+
+        if (EditorApplication.isPlaying)
+        {
+            // In Play mode: use ScreenCapture
+            ScreenCapture.CaptureScreenshot(fullPath);
+            Debug.Log(
+                $"[GameDevTools] SCREENSHOT_SAVED\n" +
+                $"Mode: Play Mode\n" +
+                $"Path: {assetPath}\n" +
+                $"Note: File will appear after Play mode exits (Unity flushes on exit)");
+        }
+        else
+        {
+            // In Edit mode: use Scene view camera
+            var sceneView = SceneView.lastActiveSceneView;
+            if (sceneView == null)
+            {
+                Debug.LogWarning(
+                    "[GameDevTools] SCREENSHOT_FAILED — no active Scene view.\n" +
+                    "Open the Scene view window, or start Play mode first.");
+                return;
+            }
+
+            var cam = sceneView.camera;
+            int w = (int)sceneView.position.width;
+            int h = (int)sceneView.position.height;
+
+            var rt = new RenderTexture(w, h, 24);
+            var prevActive = RenderTexture.active;
+            var prevTarget = cam.targetTexture;
+
+            cam.targetTexture = rt;
+            cam.Render();
+            RenderTexture.active = rt;
+
+            var tex = new Texture2D(w, h, TextureFormat.RGB24, false);
+            tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+            tex.Apply();
+
+            RenderTexture.active = prevActive;
+            cam.targetTexture = prevTarget;
+            rt.Release();
+
+            File.WriteAllBytes(fullPath, tex.EncodeToPNG());
+            AssetDatabase.Refresh();
+
+            Debug.Log(
+                $"[GameDevTools] SCREENSHOT_SAVED\n" +
+                $"Mode: Edit Mode (Scene View)\n" +
+                $"Path: {assetPath}\n" +
+                $"Size: {w}x{h}px");
+        }
+
+        // Write path to temp file for easy reference
+        File.WriteAllText(Path.Combine(TempPath, "last_screenshot.txt"), fullPath);
+    }
+
+    // ─────────────────────────────────────────────
+    // TOOL — Compare generated screenshot with reference
+    // Write to Assets/References/_temp/compare_request.txt:
+    //   REFERENCE:reference_filename.png
+    //   SCREENSHOT:Screenshots/screenshot_timestamp.png
+    //   OBJECT_TYPE:full_scene
     // MCP: execute_menu_item("GameDevTools/Compare With Reference")
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/Compare With Reference")]
     public static void CompareWithReference()
     {
-        var projectRoot = Path.GetDirectoryName(Application.dataPath);
-        var requestFile = Path.Combine(projectRoot, "references", "_compare_request.txt");
+        EnsureDirectories();
+        var requestFile = Path.Combine(TempPath, "compare_request.txt");
 
         if (!File.Exists(requestFile))
         {
-            Debug.LogWarning("[GameDevTools] No compare request file found.\n" +
-                           "Write to references/_compare_request.txt:\n" +
-                           "REFERENCE:reference_image.png\n" +
-                           "GENERATED:Assets/path/to/generated_sprite.png\n" +
-                           "OBJECT_TYPE:cherry");
+            Debug.LogWarning(
+                "[GameDevTools] COMPARE_REQUEST_MISSING\n" +
+                "Write to Assets/References/_temp/compare_request.txt:\n" +
+                "REFERENCE:reference_gameplay.png\n" +
+                "SCREENSHOT:Screenshots/screenshot_timestamp.png\n" +
+                "OBJECT_TYPE:full_scene");
             return;
         }
 
         var content = File.ReadAllText(requestFile);
-        var lines = content.Split('\n');
+        string refName = null, shotName = null, objectType = "full_scene";
 
-        string referenceName = null, generatedPath = null, objectType = "unknown";
-        foreach (var line in lines)
+        foreach (var line in content.Split('\n'))
         {
-            if (line.StartsWith("REFERENCE:")) referenceName = line.Substring("REFERENCE:".Length).Trim();
-            else if (line.StartsWith("GENERATED:")) generatedPath = line.Substring("GENERATED:".Length).Trim();
-            else if (line.StartsWith("OBJECT_TYPE:")) objectType = line.Substring("OBJECT_TYPE:".Length).Trim();
+            if (line.StartsWith("REFERENCE:")) refName = line.Substring(10).Trim();
+            else if (line.StartsWith("SCREENSHOT:")) shotName = line.Substring(11).Trim();
+            else if (line.StartsWith("OBJECT_TYPE:")) objectType = line.Substring(12).Trim();
         }
 
-        if (string.IsNullOrEmpty(referenceName) || string.IsNullOrEmpty(generatedPath))
+        var refPath = Path.Combine(ReferencesPath, refName ?? "");
+        var shotPath = Path.Combine(ReferencesPath, shotName ?? "");
+
+        if (!File.Exists(refPath))
         {
-            Debug.LogError("[GameDevTools] Compare request file is missing REFERENCE or GENERATED fields.");
+            Debug.LogError($"[GameDevTools] COMPARE_FAILED — reference not found: {refName}");
+            return;
+        }
+        if (!File.Exists(shotPath))
+        {
+            Debug.LogError($"[GameDevTools] COMPARE_FAILED — screenshot not found: {shotName}");
             return;
         }
 
-        var referencePath = Path.Combine(projectRoot, "references", referenceName);
-        var fullGeneratedPath = Path.Combine(Application.dataPath, "..", generatedPath);
+        var refBytes = File.ReadAllBytes(refPath);
+        var shotBytes = File.ReadAllBytes(shotPath);
 
-        if (!File.Exists(referencePath))
-        {
-            Debug.LogError($"[GameDevTools] Reference image not found: {referenceName}");
-            return;
-        }
-        if (!File.Exists(fullGeneratedPath))
-        {
-            Debug.LogError($"[GameDevTools] Generated sprite not found: {generatedPath}");
-            return;
-        }
+        var refTex = new Texture2D(2, 2); refTex.LoadImage(refBytes);
+        var shotTex = new Texture2D(2, 2); shotTex.LoadImage(shotBytes);
 
-        // Load both images
-        var refBytes = File.ReadAllBytes(referencePath);
-        var refTex = new Texture2D(2, 2);
-        refTex.LoadImage(refBytes);
+        float colorScore = CompareColorHistograms(refTex, shotTex);
+        float brightnessScore = CompareBrightnessDistribution(refTex, shotTex);
+        float edgeScore = CompareEdgeDensity(refTex, shotTex);
+        float localScore = (colorScore + brightnessScore + edgeScore) / 3f;
 
-        var genBytes = File.ReadAllBytes(fullGeneratedPath);
-        var genTex = new Texture2D(2, 2);
-        genTex.LoadImage(genBytes);
-
-        // Color histogram comparison
-        float colorScore = CompareColorHistograms(refTex, genTex);
-
-        // Edge density comparison (shape similarity proxy)
-        float shapeScore = CompareEdgeDensity(refTex, genTex);
-
-        // Brightness distribution comparison
-        float brightnessScore = CompareBrightnessDistribution(refTex, genTex);
-
-        // Write both images as base64 for Vision comparison
         var refBase64 = Convert.ToBase64String(refBytes);
-        var genBase64 = Convert.ToBase64String(genBytes);
+        var shotBase64 = Convert.ToBase64String(shotBytes);
 
-        var outputPath = Path.Combine(projectRoot, "references", "_comparison_output.txt");
-        File.WriteAllText(outputPath,
-            $"REFERENCE_BASE64:{refBase64}\n" +
-            $"GENERATED_BASE64:{genBase64}\n" +
+        var outputFile = Path.Combine(TempPath, "comparison_output.txt");
+        File.WriteAllText(outputFile,
             $"OBJECT_TYPE:{objectType}\n" +
-            $"VISION_INSTRUCTION:Compare these two game sprite images in detail. " +
-            $"Score similarity 0-100 for each: " +
-            $"1) Color accuracy (are the colors matching?) " +
-            $"2) Shape accuracy (is the outline/silhouette similar?) " +
-            $"3) Gradient quality (does the shading look similar?) " +
-            $"4) Outline thickness (is the border thickness similar?) " +
-            $"5) Highlight/shine position (is the shine in the same place?) " +
-            $"6) Face accuracy if present (do the eyes/expression match?) " +
-            $"Then give an OVERALL score 0-100. " +
-            $"For any score below 80, explain exactly what is different and how to fix it. " +
-            $"Return as JSON: {{color:N, shape:N, gradient:N, outline:N, highlight:N, face:N, overall:N, fixes:[]}}");
+            $"LOCAL_SCORE:{localScore:F1}\n" +
+            $"COLOR_SCORE:{colorScore:F1}\n" +
+            $"BRIGHTNESS_SCORE:{brightnessScore:F1}\n" +
+            $"EDGE_SCORE:{edgeScore:F1}\n" +
+            $"REFERENCE_BASE64:{refBase64}\n" +
+            $"SCREENSHOT_BASE64:{shotBase64}\n" +
+            $"VISION_PROMPT:Compare these two game screenshots in extreme detail. " +
+            $"Score each aspect 0-100: " +
+            $"1) Color accuracy (do the colors match the reference?) " +
+            $"2) Scene layout (are elements in the same positions?) " +
+            $"3) Visual quality (does it look professional vs placeholder?) " +
+            $"4) Art style match (same style as reference?) " +
+            $"5) Background quality (gradient? detailed? or flat color?) " +
+            $"6) Character/object quality (detailed sprites or blobs?) " +
+            $"7) UI quality (readable? styled? or default gray?) " +
+            $"Give OVERALL score 0-100. " +
+            $"List TOP 3 FIXES needed with exact instructions. " +
+            $"Return as JSON: {{color:N, layout:N, quality:N, style:N, background:N, objects:N, ui:N, overall:N, fixes:[]}}");
 
-        float overallLocal = (colorScore + shapeScore + brightnessScore) / 3f;
-
-        Debug.Log($"[GameDevTools] COMPARISON_READY\n" +
-                 $"Object: {objectType}\n" +
-                 $"Reference: {referenceName}\n" +
-                 $"Generated: {generatedPath}\n" +
-                 $"Local scores (pixel-based):\n" +
-                 $"  Color histogram similarity: {colorScore:F1}%\n" +
-                 $"  Shape/edge similarity:       {shapeScore:F1}%\n" +
-                 $"  Brightness distribution:     {brightnessScore:F1}%\n" +
-                 $"  Local overall estimate:      {overallLocal:F1}%\n" +
-                 $"Both images written to references/_comparison_output.txt\n" +
-                 $"Read that file and send to Vision API for detailed analysis.\n" +
-                 $"{(overallLocal < 85f ? "⚠️ Score below 85 — VisualAgent should refine the sprite." : "✅ Score acceptable.")}");
+        var passFail = localScore >= 70f ? "PASS" : "FAIL";
+        Debug.Log(
+            $"[GameDevTools] COMPARISON_COMPLETE — {passFail}\n" +
+            $"Object: {objectType}\n" +
+            $"Reference: {refName}\n" +
+            $"Screenshot: {shotName}\n" +
+            $"Local pixel scores:\n" +
+            $"  Color histogram: {colorScore:F1}%\n" +
+            $"  Brightness dist: {brightnessScore:F1}%\n" +
+            $"  Edge density:    {edgeScore:F1}%\n" +
+            $"  Local overall:   {localScore:F1}%\n" +
+            $"Full comparison data: Assets/References/_temp/comparison_output.txt\n" +
+            $"Read that file and send both images to Vision for detailed analysis.\n" +
+            $"{(localScore < 70f ? "⚠️ Score below 70 — VisualAgent must fix and retry." : "✅ Acceptable quality.")}");
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 5 — Check visual quality
+    // TOOL — Check visual quality (gray/missing sprites)
     // MCP: execute_menu_item("GameDevTools/Check Visual Quality")
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/Check Visual Quality")]
@@ -282,10 +380,9 @@ public static class ReferenceAnalyzerTool
         {
             var path = GetPath(r.gameObject);
             if (r.sprite == null) { issues.Add($"[NO SPRITE]  {path}"); continue; }
-
             Color.RGBToHSV(r.color, out _, out float sat, out float val);
             if (sat < 0.12f && val > 0.25f)
-                issues.Add($"[GRAY]       {path}  (saturation={sat:F2})");
+                issues.Add($"[GRAY]       {path}  sat={sat:F2}");
             else if (r.color == Color.white && r.sprite.name.ToLower().Contains("default"))
                 issues.Add($"[DEFAULT]    {path}");
         }
@@ -299,182 +396,149 @@ public static class ReferenceAnalyzerTool
         }
 
         if (issues.Count == 0)
-            Debug.Log($"[GameDevTools] ✅ Visual quality PASSED\n" +
-                     $"Checked: {spriteRenderers.Length} sprites, {images.Length} UI images");
+            Debug.Log(
+                $"[GameDevTools] VISUAL_QUALITY_PASS\n" +
+                $"Checked: {spriteRenderers.Length} sprites, {images.Length} UI images\n" +
+                $"No gray or placeholder objects found.");
         else
-            Debug.LogWarning($"[GameDevTools] ⚠️ {issues.Count} visual issue(s):\n{string.Join("\n", issues)}");
+            Debug.LogWarning(
+                $"[GameDevTools] VISUAL_QUALITY_FAIL — {issues.Count} issue(s):\n" +
+                string.Join("\n", issues) + "\n" +
+                "Fix all before proceeding.");
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 6 — Capture screenshot
-    // MCP: execute_menu_item("GameDevTools/Capture Screenshot")
-    // ─────────────────────────────────────────────
-    [MenuItem("GameDevTools/Capture Screenshot")]
-    public static void CaptureScreenshot()
-    {
-        var projectRoot = Path.GetDirectoryName(Application.dataPath);
-        var outputDir = Path.Combine(projectRoot, "QA", "screenshots");
-        if (!Directory.Exists(outputDir)) Directory.CreateDirectory(outputDir);
-
-        var filename = $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-        var fullPath = Path.Combine(outputDir, filename);
-        ScreenCapture.CaptureScreenshot(fullPath);
-
-        Debug.Log($"[GameDevTools] SCREENSHOT_SAVED\n" +
-                 $"Path: QA/screenshots/{filename}\n" +
-                 $"Full path: {fullPath}");
-    }
-
-    // ─────────────────────────────────────────────
-    // TOOL 7 — Full QA Report
+    // TOOL — Full QA Report
     // MCP: execute_menu_item("GameDevTools/Run Full QA Report")
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/Run Full QA Report")]
     public static void RunFullQAReport()
     {
         Debug.Log("[GameDevTools] ═══ FULL QA REPORT START ═══");
-        CheckVisualQuality();
+        CheckInputSystemSettings();
         CheckEventSystem();
         CheckTMPUsage();
-        CheckInputSystemSettings();
+        CheckVisualQuality();
         ListReferenceImages();
+        CheckButtonSizes();
+        CheckBackgroundQuality();
         Debug.Log("[GameDevTools] ═══ FULL QA REPORT END ═══");
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 8 — Validate Fruit Database
-    // MCP: execute_menu_item("GameDevTools/Validate Fruit Database")
+    // TOOL — Check button sizes (U15)
+    // MCP: execute_menu_item("GameDevTools/Check Button Sizes")
     // ─────────────────────────────────────────────
-    [MenuItem("GameDevTools/Validate Fruit Database")]
-    public static void ValidateFruitDatabase()
+    [MenuItem("GameDevTools/Check Button Sizes")]
+    public static void CheckButtonSizes()
     {
-        var db = AssetDatabase.LoadAssetAtPath<ScriptableObject>("Assets/Data/FruitDatabase.asset");
-        if (db == null)
+        var issues = new List<string>();
+        var buttons = Object.FindObjectsByType<UnityEngine.UI.Button>(FindObjectsSortMode.None);
+
+        foreach (var btn in buttons)
         {
-            Debug.LogError("[GameDevTools] FruitDatabase.asset not found at Assets/Data/FruitDatabase.asset");
+            var rt = btn.GetComponent<RectTransform>();
+            if (rt == null) continue;
+
+            var rect = rt.rect;
+            var path = GetPath(btn.gameObject);
+
+            if (rect.width < 60f || rect.height < 40f)
+                issues.Add($"[TOO SMALL]  {path}  size={rect.width:F0}x{rect.height:F0}px (minimum 60x40)");
+
+            // Check for text readability
+            var tmp = btn.GetComponentInChildren<TMPro.TMP_Text>();
+            if (tmp != null && tmp.fontSize < 14f)
+                issues.Add($"[TINY TEXT]  {path}  fontSize={tmp.fontSize} (minimum 14)");
+
+            // Check LayoutElement exists if inside a LayoutGroup
+            var parentLayout = btn.transform.parent?.GetComponent<UnityEngine.UI.HorizontalLayoutGroup>()
+                            ?? btn.transform.parent?.GetComponent<UnityEngine.UI.VerticalLayoutGroup>() as UnityEngine.UI.LayoutGroup;
+            if (parentLayout != null && btn.GetComponent<UnityEngine.UI.LayoutElement>() == null)
+                issues.Add($"[NO LAYOUT_ELEMENT]  {path}  inside layout group but missing LayoutElement component");
+        }
+
+        if (issues.Count == 0)
+            Debug.Log($"[GameDevTools] ✅ Button sizes OK — {buttons.Length} buttons checked");
+        else
+            Debug.LogWarning($"[GameDevTools] ⚠️ Button size issues ({issues.Count}):\n{string.Join("\n", issues)}");
+    }
+
+    // ─────────────────────────────────────────────
+    // TOOL — Check background quality (U17)
+    // MCP: execute_menu_item("GameDevTools/Check Background Quality")
+    // ─────────────────────────────────────────────
+    [MenuItem("GameDevTools/Check Background Quality")]
+    public static void CheckBackgroundQuality()
+    {
+        var issues = new List<string>();
+
+        // Check camera background color
+        var cam = Camera.main;
+        if (cam != null)
+        {
+            Color.RGBToHSV(cam.backgroundColor, out _, out float sat, out float val);
+            if (sat < 0.05f)
+                issues.Add($"[FLAT CAMERA BG]  Camera.backgroundColor is near-gray/black. Use a SpriteRenderer background instead.");
+        }
+
+        // Check for gradient background sprite
+        var bgSprites = Object.FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None);
+        bool hasBackground = false;
+        bool hasGradient = false;
+
+        foreach (var sr in bgSprites)
+        {
+            if (sr.sortingOrder <= -90)
+            {
+                hasBackground = true;
+                // Check if it uses a gradient texture (width > 1 and height > 1)
+                if (sr.sprite != null && sr.sprite.texture.height > 4)
+                    hasGradient = true;
+            }
+        }
+
+        if (!hasBackground)
+            issues.Add("[NO BACKGROUND]  No SpriteRenderer found at sortingOrder <= -90. Add a background sprite.");
+        else if (!hasGradient)
+            issues.Add("[FLAT BACKGROUND]  Background sprite found but may be single color. Use CreateVerticalGradient().");
+
+        if (issues.Count == 0)
+            Debug.Log("[GameDevTools] ✅ Background quality OK — gradient background detected");
+        else
+            Debug.LogWarning($"[GameDevTools] ⚠️ Background issues:\n{string.Join("\n", issues)}\n" +
+                           "Per U17: background must always use gradient. Flat backgrounds look like placeholders.");
+    }
+
+    // ─────────────────────────────────────────────
+    // TOOL — Validate game database
+    // MCP: execute_menu_item("GameDevTools/Validate Game Database")
+    // ─────────────────────────────────────────────
+    [MenuItem("GameDevTools/Validate Game Database")]
+    public static void ValidateGameDatabase()
+    {
+        // Try FruitDatabase first, then generic search
+        var fruitsDb = AssetDatabase.LoadAssetAtPath<ScriptableObject>("Assets/Data/FruitDatabase.asset");
+        if (fruitsDb != null)
+        {
+            ValidateScriptableObject(fruitsDb, "FruitDatabase", "fruits", 11);
             return;
         }
 
-        var so = new SerializedObject(db);
-        var fruitsArray = so.FindProperty("fruits");
-        if (fruitsArray == null) { Debug.LogWarning("[GameDevTools] FruitDatabase has no 'fruits' array."); return; }
-
-        var issues = new List<string>();
-        if (fruitsArray.arraySize != 11) issues.Add($"Expected 11 tiers, found {fruitsArray.arraySize}");
-        for (int i = 0; i < fruitsArray.arraySize; i++)
-            if (fruitsArray.GetArrayElementAtIndex(i).objectReferenceValue == null)
-                issues.Add($"Tier {i + 1}: NULL");
-
-        if (issues.Count == 0)
-            Debug.Log($"[GameDevTools] ✅ FruitDatabase valid — {fruitsArray.arraySize} tiers OK");
-        else
-            Debug.LogWarning($"[GameDevTools] ⚠️ FruitDatabase issues:\n{string.Join("\n", issues)}");
-    }
-
-    // ─────────────────────────────────────────────
-    // Image comparison helpers
-    // ─────────────────────────────────────────────
-    private static float CompareColorHistograms(Texture2D a, Texture2D b)
-    {
-        var pixA = a.GetPixels32();
-        var pixB = b.GetPixels32();
-
-        // Sample up to 10000 pixels for performance
-        int step = Mathf.Max(1, pixA.Length / 10000);
-        var histA = new int[16, 16, 16];
-        var histB = new int[16, 16, 16];
-
-        int countA = 0, countB = 0;
-        for (int i = 0; i < pixA.Length; i += step)
+        // Search for any ScriptableObject in Data folder
+        var guids = AssetDatabase.FindAssets("t:ScriptableObject", new[] { "Assets/Data" });
+        if (guids.Length == 0)
         {
-            if (pixA[i].a < 10) continue; // skip transparent
-            histA[pixA[i].r / 16, pixA[i].g / 16, pixA[i].b / 16]++;
-            countA++;
-        }
-        for (int i = 0; i < pixB.Length; i += step)
-        {
-            if (pixB[i].a < 10) continue;
-            histB[pixB[i].r / 16, pixB[i].g / 16, pixB[i].b / 16]++;
-            countB++;
+            Debug.LogWarning("[GameDevTools] No ScriptableObjects found in Assets/Data/");
+            return;
         }
 
-        if (countA == 0 || countB == 0) return 0f;
-
-        float intersection = 0f;
-        for (int r = 0; r < 16; r++)
-            for (int g = 0; g < 16; g++)
-                for (int bl = 0; bl < 16; bl++)
-                    intersection += Mathf.Min(
-                        (float)histA[r, g, bl] / countA,
-                        (float)histB[r, g, bl] / countB);
-
-        return intersection * 100f;
-    }
-
-    private static float CompareEdgeDensity(Texture2D a, Texture2D b)
-    {
-        float edgeDensityA = CalculateEdgeDensity(a);
-        float edgeDensityB = CalculateEdgeDensity(b);
-        if (edgeDensityA == 0 && edgeDensityB == 0) return 100f;
-        float maxDensity = Mathf.Max(edgeDensityA, edgeDensityB);
-        float diff = Mathf.Abs(edgeDensityA - edgeDensityB) / maxDensity;
-        return Mathf.Clamp01(1f - diff) * 100f;
-    }
-
-    private static float CalculateEdgeDensity(Texture2D tex)
-    {
-        var pixels = tex.GetPixels32();
-        int w = tex.width, h = tex.height;
-        int edgeCount = 0, total = 0;
-
-        for (int y = 1; y < h - 1; y++)
+        foreach (var guid in guids)
         {
-            for (int x = 1; x < w - 1; x++)
-            {
-                var c = pixels[y * w + x];
-                if (c.a < 10) continue;
-                total++;
-
-                var right = pixels[y * w + (x + 1)];
-                var up = pixels[(y + 1) * w + x];
-
-                float diffR = Mathf.Abs(c.r - right.r) + Mathf.Abs(c.g - right.g) + Mathf.Abs(c.b - right.b);
-                float diffU = Mathf.Abs(c.r - up.r) + Mathf.Abs(c.g - up.g) + Mathf.Abs(c.b - up.b);
-
-                if (diffR > 60 || diffU > 60) edgeCount++;
-            }
+            var path = AssetDatabase.GUIDToAssetPath(guid);
+            var asset = AssetDatabase.LoadAssetAtPath<ScriptableObject>(path);
+            Debug.Log($"[GameDevTools] Found: {path} ({asset.GetType().Name})");
         }
-        return total == 0 ? 0f : (float)edgeCount / total;
-    }
-
-    private static float CompareBrightnessDistribution(Texture2D a, Texture2D b)
-    {
-        float[] bucketA = new float[8];
-        float[] bucketB = new float[8];
-        int countA = 0, countB = 0;
-
-        foreach (var p in a.GetPixels32())
-        {
-            if (p.a < 10) continue;
-            int bucket = (p.r + p.g + p.b) / 3 / 32;
-            bucketA[Mathf.Min(bucket, 7)]++;
-            countA++;
-        }
-        foreach (var p in b.GetPixels32())
-        {
-            if (p.a < 10) continue;
-            int bucket = (p.r + p.g + p.b) / 3 / 32;
-            bucketB[Mathf.Min(bucket, 7)]++;
-            countB++;
-        }
-
-        if (countA == 0 || countB == 0) return 0f;
-
-        float similarity = 0f;
-        for (int i = 0; i < 8; i++)
-            similarity += Mathf.Min(bucketA[i] / countA, bucketB[i] / countB);
-
-        return similarity * 100f;
     }
 
     // ─────────────────────────────────────────────
@@ -491,7 +555,7 @@ public static class ReferenceAnalyzerTool
         if (!hasNew && !hasOld)
             Debug.LogError("[GameDevTools] ❌ EventSystem has no input module!");
         else
-            Debug.Log($"[GameDevTools] ✅ EventSystem OK — InputSystemModule:{hasNew} StandaloneModule:{hasOld}");
+            Debug.Log($"[GameDevTools] ✅ EventSystem OK — InputSystem:{hasNew} Standalone:{hasOld}");
     }
 
     private static void CheckTMPUsage()
@@ -509,33 +573,121 @@ public static class ReferenceAnalyzerTool
 
     private static void CheckInputSystemSettings()
     {
-        var settingsPath = "ProjectSettings/ProjectSettings.asset";
-        if (!File.Exists(settingsPath)) { Debug.LogWarning("[GameDevTools] ProjectSettings.asset not found"); return; }
+        const string path = "ProjectSettings/ProjectSettings.asset";
+        if (!File.Exists(path)) { Debug.LogWarning("[GameDevTools] ProjectSettings not found"); return; }
 
-        var content = File.ReadAllText(settingsPath);
+        var content = File.ReadAllText(path);
         if (content.Contains("activeInputHandler: 1"))
-            Debug.LogError("[GameDevTools] ❌ activeInputHandler = 1 — StandaloneInputModule will crash!");
+            Debug.LogError("[GameDevTools] ❌ activeInputHandler = 1 — WILL CRASH with StandaloneInputModule!");
         else if (content.Contains("activeInputHandler: 2"))
-            Debug.Log("[GameDevTools] ✅ activeInputHandler = 2 (Both) — OK");
+            Debug.Log("[GameDevTools] ✅ activeInputHandler = 2 (Both)");
         else
-            Debug.Log("[GameDevTools] ℹ️ activeInputHandler = 0 (Old Input)");
+            Debug.Log("[GameDevTools] ℹ️ activeInputHandler = 0 (Legacy only)");
     }
 
-    private static string GetAvailableReferenceImages(string projectRoot)
+    private static void ValidateScriptableObject(ScriptableObject asset, string name, string arrayProp, int expectedCount)
     {
-        var refDir = Path.Combine(projectRoot, "references");
-        if (!Directory.Exists(refDir)) return "none (folder missing)";
+        var so = new SerializedObject(asset);
+        var arr = so.FindProperty(arrayProp);
+        if (arr == null) { Debug.LogWarning($"[GameDevTools] {name}: no '{arrayProp}' array found"); return; }
+
+        var issues = new List<string>();
+        if (arr.arraySize != expectedCount)
+            issues.Add($"Expected {expectedCount} entries, found {arr.arraySize}");
+        for (int i = 0; i < arr.arraySize; i++)
+            if (arr.GetArrayElementAtIndex(i).objectReferenceValue == null)
+                issues.Add($"Entry {i + 1}: NULL");
+
+        if (issues.Count == 0)
+            Debug.Log($"[GameDevTools] ✅ {name} valid — {arr.arraySize} entries");
+        else
+            Debug.LogWarning($"[GameDevTools] ⚠️ {name} issues:\n{string.Join("\n", issues)}");
+    }
+
+    private static void EnsureDirectories()
+    {
+        if (!Directory.Exists(ReferencesPath)) Directory.CreateDirectory(ReferencesPath);
+        if (!Directory.Exists(TempPath)) Directory.CreateDirectory(TempPath);
+        var screenshotsDir = Path.Combine(ReferencesPath, "Screenshots");
+        if (!Directory.Exists(screenshotsDir)) Directory.CreateDirectory(screenshotsDir);
+        AssetDatabase.Refresh();
+    }
+
+    private static string GetAvailableImages()
+    {
+        if (!Directory.Exists(ReferencesPath)) return "none (folder missing)";
         var files = new List<string>();
         foreach (var ext in new[] { "*.png", "*.jpg", "*.jpeg" })
-            files.AddRange(Directory.GetFileSystemEntries(refDir, ext));
+            files.AddRange(Directory.GetFiles(ReferencesPath, ext));
         return files.Count == 0 ? "none" : string.Join(", ", files.ConvertAll(Path.GetFileName));
     }
 
     private static string GetPath(GameObject go)
     {
         var path = go.name;
-        var parent = go.transform.parent;
-        while (parent != null) { path = parent.name + "/" + path; parent = parent.parent; }
+        var p = go.transform.parent;
+        while (p != null) { path = p.name + "/" + path; p = p.parent; }
         return path;
+    }
+
+    // ─────────────────────────────────────────────
+    // Image comparison math
+    // ─────────────────────────────────────────────
+    private static float CompareColorHistograms(Texture2D a, Texture2D b)
+    {
+        int step = Mathf.Max(1, Mathf.Max(a.width * a.height, b.width * b.height) / 10000);
+        var hA = new int[16, 16, 16]; var hB = new int[16, 16, 16];
+        int cA = 0, cB = 0;
+
+        var pA = a.GetPixels32(); var pB = b.GetPixels32();
+        for (int i = 0; i < pA.Length; i += step)
+            if (pA[i].a > 10) { hA[pA[i].r / 16, pA[i].g / 16, pA[i].b / 16]++; cA++; }
+        for (int i = 0; i < pB.Length; i += step)
+            if (pB[i].a > 10) { hB[pB[i].r / 16, pB[i].g / 16, pB[i].b / 16]++; cB++; }
+
+        if (cA == 0 || cB == 0) return 0f;
+        float inter = 0f;
+        for (int r = 0; r < 16; r++)
+            for (int g = 0; g < 16; g++)
+                for (int bl = 0; bl < 16; bl++)
+                    inter += Mathf.Min((float)hA[r, g, bl] / cA, (float)hB[r, g, bl] / cB);
+        return inter * 100f;
+    }
+
+    private static float CompareEdgeDensity(Texture2D a, Texture2D b)
+    {
+        float eA = CalcEdgeDensity(a), eB = CalcEdgeDensity(b);
+        if (eA == 0 && eB == 0) return 100f;
+        return Mathf.Clamp01(1f - Mathf.Abs(eA - eB) / Mathf.Max(eA, eB)) * 100f;
+    }
+
+    private static float CalcEdgeDensity(Texture2D tex)
+    {
+        var px = tex.GetPixels32(); int w = tex.width, h = tex.height;
+        int edges = 0, total = 0;
+        for (int y = 1; y < h - 1; y++)
+            for (int x = 1; x < w - 1; x++)
+            {
+                var c = px[y * w + x]; if (c.a < 10) continue; total++;
+                var r = px[y * w + x + 1]; var u = px[(y + 1) * w + x];
+                if (Mathf.Abs(c.r - r.r) + Mathf.Abs(c.g - r.g) + Mathf.Abs(c.b - r.b) > 60 ||
+                    Mathf.Abs(c.r - u.r) + Mathf.Abs(c.g - u.g) + Mathf.Abs(c.b - u.b) > 60)
+                    edges++;
+            }
+        return total == 0 ? 0f : (float)edges / total;
+    }
+
+    private static float CompareBrightnessDistribution(Texture2D a, Texture2D b)
+    {
+        var bA = new float[8]; var bB = new float[8];
+        int cA = 0, cB = 0;
+        foreach (var p in a.GetPixels32())
+            if (p.a > 10) { bA[Mathf.Min((p.r + p.g + p.b) / 3 / 32, 7)]++; cA++; }
+        foreach (var p in b.GetPixels32())
+            if (p.a > 10) { bB[Mathf.Min((p.r + p.g + p.b) / 3 / 32, 7)]++; cB++; }
+        if (cA == 0 || cB == 0) return 0f;
+        float sim = 0f;
+        for (int i = 0; i < 8; i++) sim += Mathf.Min(bA[i] / cA, bB[i] / cB);
+        return sim * 100f;
     }
 }
