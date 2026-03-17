@@ -14,22 +14,3 @@
     "versionDefines": [],
     "noEngineReferences": false
 }
-```
-
-GitHub'da:
-```
-GameDevTools → Editor → Add file → Create new file
-Name: TaafGameDevTools.Editor.asmdef
-```
-
-İçeriği yapıştır, commit et.
-
-Sonra Unity'de:
-```
-Package Manager → Taaf Game Dev Tools → sağ tıkla → Remove
-```
-
-Tekrar ekle:
-```
-+ → Add package from git URL
-https://github.com/Kalempox/UnityGameDevTools.git?path=/GameDevTools
