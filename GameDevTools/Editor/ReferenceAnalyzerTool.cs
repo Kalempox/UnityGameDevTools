@@ -7,13 +7,14 @@ using System.IO;
 
 /// <summary>
 /// Custom game dev tools accessible via Unity menu items.
-/// Call these through MCP using: execute_menu_item("GameDevTools/...")
+/// Call via MCP: execute_menu_item("GameDevTools/...")
+/// Results appear in Unity Console — read with read_console_logs.
 /// </summary>
 public static class ReferenceAnalyzerTool
 {
     // ─────────────────────────────────────────────
     // TOOL 1 — List reference images
-    // MCP call: execute_menu_item("GameDevTools/List Reference Images")
+    // MCP: execute_menu_item("GameDevTools/List Reference Images")
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/List Reference Images")]
     public static void ListReferenceImages()
@@ -23,142 +24,129 @@ public static class ReferenceAnalyzerTool
 
         if (!Directory.Exists(refDir))
         {
-            Debug.LogWarning($"[GameDevTools] references/ folder does not exist.\n" +
-                           $"Create it at: {refDir}\n" +
-                           "Then add PNG/JPG reference images.");
+            Debug.LogWarning($"[GameDevTools] references/ folder does not exist.\nCreate it at: {refDir}");
             return;
         }
 
-        var extensions = new[] { "*.png", "*.jpg", "*.jpeg" };
         var files = new List<string>();
-        foreach (var ext in extensions)
+        foreach (var ext in new[] { "*.png", "*.jpg", "*.jpeg" })
             files.AddRange(Directory.GetFiles(refDir, ext));
 
         if (files.Count == 0)
         {
-            Debug.LogWarning($"[GameDevTools] references/ folder is empty. Add PNG or JPG images.");
+            Debug.LogWarning("[GameDevTools] references/ folder is empty.");
             return;
         }
 
-        var result = $"[GameDevTools] Found {files.Count} reference image(s):\n";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"[GameDevTools] Found {files.Count} reference image(s):");
         foreach (var f in files)
         {
             var info = new FileInfo(f);
-            result += $"  - {info.Name}  ({info.Length / 1024}KB)\n";
+            sb.AppendLine($"  - {info.Name}  ({info.Length / 1024}KB)");
         }
-        Debug.Log(result);
+        Debug.Log(sb.ToString());
     }
 
     // ─────────────────────────────────────────────
     // TOOL 2 — Check visual quality
-    // MCP call: execute_menu_item("GameDevTools/Check Visual Quality")
+    // MCP: execute_menu_item("GameDevTools/Check Visual Quality")
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/Check Visual Quality")]
     public static void CheckVisualQuality()
     {
         var issues = new List<string>();
 
-        // SpriteRenderer check
-        var spriteRenderers = GameObject.FindObjectsOfType<SpriteRenderer>(true);
+        var spriteRenderers = Object.FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None);
         foreach (var r in spriteRenderers)
         {
             var path = GetPath(r.gameObject);
-
-            if (r.sprite == null)
-            {
-                issues.Add($"[NO SPRITE]  {path}");
-                continue;
-            }
+            if (r.sprite == null) { issues.Add($"[NO SPRITE]  {path}"); continue; }
 
             Color.RGBToHSV(r.color, out _, out float sat, out float val);
-
             if (sat < 0.12f && val > 0.25f)
                 issues.Add($"[GRAY]       {path}  (saturation={sat:F2})");
             else if (r.color == Color.white && r.sprite.name.ToLower().Contains("default"))
-                issues.Add($"[DEFAULT]    {path}  (white + default sprite)");
+                issues.Add($"[DEFAULT]    {path}");
         }
 
-        // UI Image check
-        var images = GameObject.FindObjectsOfType<Image>(true);
+        var images = Object.FindObjectsByType<Image>(FindObjectsSortMode.None);
         foreach (var img in images)
         {
             Color.RGBToHSV(img.color, out _, out float sat, out float val);
             if (img.sprite == null && sat < 0.10f && val > 0.20f)
-                issues.Add($"[UI-GRAY]    {GetPath(img.gameObject)}  (flat gray panel)");
+                issues.Add($"[UI-GRAY]    {GetPath(img.gameObject)}");
         }
 
         if (issues.Count == 0)
-        {
             Debug.Log($"[GameDevTools] ✅ Visual quality PASSED\n" +
-                     $"Checked: {spriteRenderers.Length} sprites, {images.Length} UI images\n" +
-                     "No gray or placeholder objects found.");
-        }
+                     $"Checked: {spriteRenderers.Length} sprites, {images.Length} UI images");
         else
-        {
-            var msg = $"[GameDevTools] ⚠️ Visual quality FAILED — {issues.Count} issue(s):\n\n";
-            msg += string.Join("\n", issues);
-            msg += $"\n\nTotal checked: {spriteRenderers.Length + images.Length} objects";
-            Debug.LogWarning(msg);
-        }
+            Debug.LogWarning($"[GameDevTools] ⚠️ {issues.Count} visual issue(s):\n{string.Join("\n", issues)}");
     }
 
     // ─────────────────────────────────────────────
     // TOOL 3 — Capture screenshot
-    // MCP call: execute_menu_item("GameDevTools/Capture Screenshot")
+    // MCP: execute_menu_item("GameDevTools/Capture Screenshot")
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/Capture Screenshot")]
     public static void CaptureScreenshot()
     {
         var projectRoot = Path.GetDirectoryName(Application.dataPath);
         var outputDir = Path.Combine(projectRoot, "QA", "screenshots");
+        if (!Directory.Exists(outputDir)) Directory.CreateDirectory(outputDir);
 
-        if (!Directory.Exists(outputDir))
-            Directory.CreateDirectory(outputDir);
-
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var filename = $"screenshot_{timestamp}.png";
-        var outputPath = Path.Combine(outputDir, filename);
-
-        ScreenCapture.CaptureScreenshot(outputPath);
+        var filename = $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        ScreenCapture.CaptureScreenshot(Path.Combine(outputDir, filename));
         Debug.Log($"[GameDevTools] Screenshot saved: QA/screenshots/{filename}");
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 4 — Validate fruit database (game-specific)
-    // MCP call: execute_menu_item("GameDevTools/Validate Fruit Database")
+    // TOOL 4 — Full QA Report
+    // MCP: execute_menu_item("GameDevTools/Run Full QA Report")
+    // ─────────────────────────────────────────────
+    [MenuItem("GameDevTools/Run Full QA Report")]
+    public static void RunFullQAReport()
+    {
+        Debug.Log("[GameDevTools] ═══ FULL QA REPORT START ═══");
+        CheckVisualQuality();
+        CheckEventSystem();
+        CheckTMPUsage();
+        CheckInputSystemSettings();
+        Debug.Log("[GameDevTools] ═══ FULL QA REPORT END ═══");
+    }
+
+    // ─────────────────────────────────────────────
+    // TOOL 5 — Validate Fruit Database
+    // MCP: execute_menu_item("GameDevTools/Validate Fruit Database")
     // ─────────────────────────────────────────────
     [MenuItem("GameDevTools/Validate Fruit Database")]
     public static void ValidateFruitDatabase()
     {
-        var db = AssetDatabase.LoadAssetAtPath<ScriptableObject>(
-            "Assets/Data/FruitDatabase.asset");
-
+        var db = AssetDatabase.LoadAssetAtPath<ScriptableObject>("Assets/Data/FruitDatabase.asset");
         if (db == null)
         {
             Debug.LogError("[GameDevTools] FruitDatabase.asset not found at Assets/Data/FruitDatabase.asset");
             return;
         }
 
-        // SerializedObject ile kontrol et
         var so = new SerializedObject(db);
         var fruitsArray = so.FindProperty("fruits");
-
         if (fruitsArray == null)
         {
-            Debug.LogWarning("[GameDevTools] FruitDatabase has no 'fruits' array property.");
+            Debug.LogWarning("[GameDevTools] FruitDatabase has no 'fruits' array.");
             return;
         }
 
         var issues = new List<string>();
-        for (int i = 0; i < fruitsArray.arraySize; i++)
-        {
-            var elem = fruitsArray.GetArrayElementAtIndex(i);
-            if (elem.objectReferenceValue == null)
-                issues.Add($"Tier {i + 1}: NULL entry");
-        }
-
         if (fruitsArray.arraySize != 11)
             issues.Add($"Expected 11 tiers, found {fruitsArray.arraySize}");
+
+        for (int i = 0; i < fruitsArray.arraySize; i++)
+        {
+            if (fruitsArray.GetArrayElementAtIndex(i).objectReferenceValue == null)
+                issues.Add($"Tier {i + 1}: NULL");
+        }
 
         if (issues.Count == 0)
             Debug.Log($"[GameDevTools] ✅ FruitDatabase valid — {fruitsArray.arraySize} tiers OK");
@@ -167,43 +155,29 @@ public static class ReferenceAnalyzerTool
     }
 
     // ─────────────────────────────────────────────
-    // TOOL 5 — Full QA report
-    // MCP call: execute_menu_item("GameDevTools/Run Full QA Report")
-    // ─────────────────────────────────────────────
-    [MenuItem("GameDevTools/Run Full QA Report")]
-    public static void RunFullQAReport()
-    {
-        Debug.Log("[GameDevTools] ═══ FULL QA REPORT ═══");
-        CheckVisualQuality();
-        CheckEventSystem();
-        CheckTMPUsage();
-        Debug.Log("[GameDevTools] ═══ QA REPORT COMPLETE ═══");
-    }
-
-    // ─────────────────────────────────────────────
     // Helper checks
     // ─────────────────────────────────────────────
     private static void CheckEventSystem()
     {
-        var es = GameObject.FindObjectOfType<UnityEngine.EventSystems.EventSystem>();
+        var es = Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>();
         if (es == null)
         {
             Debug.LogError("[GameDevTools] ❌ EventSystem NOT FOUND in scene!");
             return;
         }
 
-        bool hasNewInput = es.GetComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>() != null;
-        bool hasOldInput = es.GetComponent<UnityEngine.EventSystems.StandaloneInputModule>() != null;
+        bool hasNew = es.GetComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>() != null;
+        bool hasOld = es.GetComponent<UnityEngine.EventSystems.StandaloneInputModule>() != null;
 
-        if (!hasNewInput && !hasOldInput)
+        if (!hasNew && !hasOld)
             Debug.LogError("[GameDevTools] ❌ EventSystem has no input module!");
         else
-            Debug.Log($"[GameDevTools] ✅ EventSystem OK — NewInput:{hasNewInput} OldInput:{hasOldInput}");
+            Debug.Log($"[GameDevTools] ✅ EventSystem OK — InputSystemModule:{hasNew} StandaloneModule:{hasOld}");
     }
 
     private static void CheckTMPUsage()
     {
-        var legacyTexts = GameObject.FindObjectsOfType<UnityEngine.UI.Text>(true);
+        var legacyTexts = Object.FindObjectsByType<UnityEngine.UI.Text>(FindObjectsSortMode.None);
         if (legacyTexts.Length > 0)
         {
             var names = new List<string>();
@@ -211,20 +185,32 @@ public static class ReferenceAnalyzerTool
             Debug.LogError($"[GameDevTools] ❌ Legacy Text found ({legacyTexts.Length}):\n{string.Join("\n", names)}");
         }
         else
+            Debug.Log("[GameDevTools] ✅ No legacy Text — TMP only");
+    }
+
+    private static void CheckInputSystemSettings()
+    {
+        var settingsPath = "ProjectSettings/ProjectSettings.asset";
+        if (!File.Exists(settingsPath))
         {
-            Debug.Log("[GameDevTools] ✅ No legacy Text components — TMP only");
+            Debug.LogWarning("[GameDevTools] Could not find ProjectSettings.asset");
+            return;
         }
+
+        var content = File.ReadAllText(settingsPath);
+        if (content.Contains("activeInputHandler: 1"))
+            Debug.LogError("[GameDevTools] ❌ activeInputHandler = 1 (New Only) — will cause StandaloneInputModule crash! Change to 2 (Both).");
+        else if (content.Contains("activeInputHandler: 2"))
+            Debug.Log("[GameDevTools] ✅ activeInputHandler = 2 (Both) — OK");
+        else
+            Debug.Log("[GameDevTools] ℹ️ activeInputHandler = 0 (Old) — consider switching to Both");
     }
 
     private static string GetPath(GameObject go)
     {
         var path = go.name;
         var parent = go.transform.parent;
-        while (parent != null)
-        {
-            path = parent.name + "/" + path;
-            parent = parent.parent;
-        }
+        while (parent != null) { path = parent.name + "/" + path; parent = parent.parent; }
         return path;
     }
 }
